@@ -1,40 +1,37 @@
 import streamlit as st
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import pandas as pd
+import av
 from pyzbar.pyzbar import decode
-import cv2
 import numpy as np
+import cv2
 
-# CSV faylini o'qish (ma'lumotlar bazasi)
+# Ma'lumotlar bazasini yuklash
 df = pd.read_csv("store_inventory.csv")
 
-# Kamera inputi
-st.title("Shtrixkodni skanerlang")
+# Barcode aniqlovchi klass
+class BarcodeScanner(VideoTransformerBase):
+    def transform(self, frame):
+        image = frame.to_ndarray(format="bgr24")
+        barcodes = decode(image)
+        for barcode in barcodes:
+            barcode_data = barcode.data.decode("utf-8")
+            x, y , w, h = barcode.rect
+            cv2.rectangle(image, (x,y), (x+w, y+h), (0,255,0), 2)
+            cv2.putText(image, barcode_data, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,0,0), 2)
 
-video = st.camera_input("Kameradan video olish")
+            # Ma'lumotlar bazasida tekshirish
+            if barcode_data in df["barcode"].values:
+                idx = df[df["barcode"] == barcode_data].index[0]
+                if df.at[idx, "quantity"] > 0:
+                    df.at[idx, "quantity"] -= 1
+                    st.success(f"{df.at[idx, 'name']} mahsuloti 1 taga kamaytirildi!")
+                else:
+                    st.warning(f"{df.at[idx, 'name']} tugagan!")
+                df.to_csv("store_inventory.csv", index=False)
 
-if video:
-    # Videodan rasm olish
-    img = cv2.imdecode(np.frombuffer(video.read(), np.uint8), -1)
-    barcodes = decode(img)  # Shtrixkodlarni aniqlash
+        return image
 
-    for barcode in barcodes:
-        barcode_data = barcode.data.decode('utf-8')  # Shtrixkodni o'qish
-        st.write(f"Shtrixkod skanerlandi: {barcode_data}")
+st.title("Shtrixkod asosidagi inventar nazorat")
 
-        # Ma'lumotlar bazasidan mahsulotni qidirish
-        product = df[df['barcode'] == barcode_data]
-
-        if not product.empty:
-            # Mahsulotni topdik, miqdorini kamaytirish
-            new_quantity = product['quantity'].values[0] - 1
-            if new_quantity >= 0:
-                df.loc[df['barcode'] == barcode_data, 'quantity'] = new_quantity
-                st.write(f"Mahsulot {product['name'].values[0]} miqdori kamaytirildi. Yangi miqdor: {new_quantity}.")
-            else:
-                # Agar mahsulotda yetarli miqdor bo'lmasa
-                st.write(f"{product['name'].values[0]} uchun etarli miqdor yo'q.")
-        else:
-            st.write("Shtrixkodga mos mahsulot topilmadi.")
-
-        # Yangi ma'lumotlarni CSV faylga saqlash
-        df.to_csv("store_inventory.csv", index=False)
+webrtc_streamer(key="scanner", video_transformer_factory=BarcodeScanner)
