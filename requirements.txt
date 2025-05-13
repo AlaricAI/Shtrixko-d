@@ -1,0 +1,6 @@
+streamlit
+pandas
+python-barcode
+Pillow
+opencv-python
+pyzbar
